@@ -16,14 +16,26 @@ SELECT i,
        ROUND(((9.99 + (i % 50) * 3.70) * 0.58)::numeric, 2)
 FROM generate_series(1,120) AS g(i);
 
+-- Order dates are derived from each customer's signup date so the synthetic
+-- dataset is temporally valid by construction while remaining deterministic.
+WITH generated_orders AS (
+    SELECT
+        i AS order_id,
+        ((i * 37) % 1200) + 1 AS customer_id
+    FROM generate_series(1,8000) AS g(i)
+)
 INSERT INTO orders
-SELECT i,
-       ((i * 37) % 1200) + 1,
-       DATE '2024-01-01' + ((i * 11) % 731),
-       CASE WHEN i % 20 = 0 THEN 'cancelled' WHEN i % 20 = 1 THEN 'refunded' ELSE 'completed' END,
-       (ARRAY['card','paypal','wallet','bank_transfer'])[(i % 4) + 1],
-       (ARRAY['North America','Europe','Asia-Pacific','Middle East'])[(i % 4) + 1]
-FROM generate_series(1,8000) AS g(i);
+SELECT
+       g.order_id,
+       g.customer_id,
+       c.signup_date + ((g.order_id * 11) % 366),
+       CASE WHEN g.order_id % 20 = 0 THEN 'cancelled'
+            WHEN g.order_id % 20 = 1 THEN 'refunded'
+            ELSE 'completed' END,
+       (ARRAY['card','paypal','wallet','bank_transfer'])[(g.order_id % 4) + 1],
+       (ARRAY['North America','Europe','Asia-Pacific','Middle East'])[(g.order_id % 4) + 1]
+FROM generated_orders g
+JOIN customers c USING (customer_id);
 
 -- 2-4 line items per order, with deterministic product selection and discounts.
 INSERT INTO order_items (order_id, product_id, quantity, unit_price, discount_pct)

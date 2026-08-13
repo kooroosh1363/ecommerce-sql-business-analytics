@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ecommerce_analytics
+      POSTGRES_USER: analyst
+      POSTGRES_PASSWORD: analyst
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./sql/01_schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ./sql/02_seed_data.sql:/docker-entrypoint-initdb.d/02_seed_data.sql:ro
+      - ./sql/03_analytics_views.sql:/docker-entrypoint-initdb.d/03_analytics_views.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U analyst -d ecommerce_analytics"]
+      interval: 5s
+      timeout: 5s
+      retries: 10

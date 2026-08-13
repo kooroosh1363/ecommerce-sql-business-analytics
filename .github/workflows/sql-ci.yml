@@ -1,0 +1,73 @@
+name: SQL CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  postgres-validation:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ecommerce_analytics
+          POSTGRES_USER: analyst
+          POSTGRES_PASSWORD: analyst
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U analyst -d ecommerce_analytics"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGDATABASE: ecommerce_analytics
+      PGUSER: analyst
+      PGPASSWORD: analyst
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Load schema, data, and analytical views
+        run: |
+          psql -v ON_ERROR_STOP=1 -f sql/01_schema.sql
+          psql -v ON_ERROR_STOP=1 -f sql/02_seed_data.sql
+          psql -v ON_ERROR_STOP=1 -f sql/03_analytics_views.sql
+
+      - name: Run business analytics queries
+        run: |
+          psql -v ON_ERROR_STOP=1 -f sql/04_business_kpis.sql > /tmp/kpis.txt
+          psql -v ON_ERROR_STOP=1 -f sql/05_customer_analytics.sql > /tmp/customers.txt
+          psql -v ON_ERROR_STOP=1 -f sql/06_product_analytics.sql > /tmp/products.txt
+
+      - name: Validate row counts
+        run: |
+          test "$(psql -Atc 'SELECT COUNT(*) FROM customers')" = "1200"
+          test "$(psql -Atc 'SELECT COUNT(*) FROM products')" = "120"
+          test "$(psql -Atc 'SELECT COUNT(*) FROM orders')" = "8000"
+          test "$(psql -Atc 'SELECT COUNT(*) FROM order_items')" -gt "0"
+
+      - name: Validate temporal consistency
+        run: |
+          test "$(psql -Atc 'SELECT COUNT(*) FROM orders o JOIN customers c USING(customer_id) WHERE o.order_date < c.signup_date')" = "0"
+
+      - name: Validate financial reconciliation
+        run: |
+          diff_value=$(psql -Atc "WITH source_total AS (SELECT SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct)) AS revenue FROM orders o JOIN order_items oi USING(order_id) WHERE o.status='completed'), view_total AS (SELECT SUM(net_revenue) AS revenue FROM v_order_financials) SELECT ROUND(s.revenue-v.revenue,2) FROM source_total s CROSS JOIN view_total v")
+          test "$diff_value" = "0.00"
+
+      - name: Run data-quality checks
+        run: psql -v ON_ERROR_STOP=1 -f sql/07_data_quality.sql
+
+      - name: Run EXPLAIN ANALYZE checks
+        run: psql -v ON_ERROR_STOP=1 -f sql/08_performance.sql > /tmp/performance.txt

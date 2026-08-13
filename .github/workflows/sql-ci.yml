@@ -63,7 +63,7 @@ jobs:
 
       - name: Validate financial reconciliation
         run: |
-          test "$(psql -Atc "WITH source_total AS (SELECT ROUND(SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct)),2) AS revenue FROM orders o JOIN order_items oi USING(order_id) WHERE o.status='completed'), view_total AS (SELECT ROUND(SUM(net_revenue),2) AS revenue FROM v_order_financials) SELECT CASE WHEN s.revenue = v.revenue THEN 1 ELSE 0 END FROM source_total s CROSS JOIN view_total v")" = "1"
+          test "$(psql -Atc "WITH source_by_order AS (SELECT o.order_id, SUM(oi.quantity * oi.unit_price * (1 - oi.discount_pct))::numeric(14,2) AS net_revenue FROM orders o JOIN order_items oi USING(order_id) WHERE o.status='completed' GROUP BY o.order_id), source_total AS (SELECT SUM(net_revenue) AS revenue FROM source_by_order), view_total AS (SELECT SUM(net_revenue) AS revenue FROM v_order_financials) SELECT CASE WHEN s.revenue = v.revenue THEN 1 ELSE 0 END FROM source_total s CROSS JOIN view_total v")" = "1"
 
       - name: Run data-quality checks
         run: psql -v ON_ERROR_STOP=1 -f sql/07_data_quality.sql
